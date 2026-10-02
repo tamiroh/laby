@@ -1,4 +1,4 @@
-use crate::game::{Game, SIZE};
+use crate::{game::Game, maze::SIZE};
 use crossterm::{
     cursor::MoveTo,
     queue,
@@ -106,8 +106,8 @@ pub fn draw(
             }
         }
         // Project a green beacon into the scene, with wall occlusion.
-        let gx = game.goal.0 as f64 + 0.5 - game.x;
-        let gy = game.goal.1 as f64 + 0.5 - game.y;
+        let gx = game.maze.goal().0 as f64 + 0.5 - game.x;
+        let gy = game.maze.goal().1 as f64 + 0.5 - game.y;
         let forward = gx * game.angle.cos() + gy * game.angle.sin();
         let lateral = -gx * game.angle.sin() + gy * game.angle.cos();
         if forward > 0.1 {
@@ -179,9 +179,9 @@ pub fn draw(
                         ('@', GOLD)
                     } else if !game.seen[y][x] {
                         (' ', Color::DarkGrey)
-                    } else if (x, y) == game.goal {
+                    } else if (x, y) == game.maze.goal() {
                         ('X', GREEN)
-                    } else if game.walls[y][x] {
+                    } else if game.maze.is_wall(x as isize, y as isize) {
                         ('#', Color::DarkGrey)
                     } else {
                         ('.', Color::Grey)
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn renders_small_normal_and_winning_screens() {
-        let mut game = Game::new(42);
+        let mut game = Game::new(crate::generator::generate(42));
         for (width, height) in [(0, 0), (1, 1), (40, 10), (59, 20), (100, 32), (160, 48)] {
             let mut output = Vec::new();
             draw(&mut output, &game, width, height, true, Duration::ZERO).unwrap();

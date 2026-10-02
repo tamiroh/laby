@@ -1,4 +1,6 @@
 mod game;
+mod generator;
+mod maze;
 mod render;
 
 use crossterm::{
@@ -76,7 +78,7 @@ fn main() -> io::Result<()> {
         hook(info);
     }));
     let _terminal = Terminal::enter()?;
-    let mut game = Game::new(initial_seed);
+    let mut game = Game::new(generator::generate(initial_seed));
     let mut started = Instant::now();
     let mut finished = None;
     let mut map = true;
@@ -118,7 +120,7 @@ fn main() -> io::Result<()> {
                 KeyCode::Right => game.act(Action::Right),
                 KeyCode::Char('m' | 'M') => map = !map,
                 KeyCode::Char('r' | 'R') => {
-                    game = Game::new(seed());
+                    game = Game::new(generator::generate(seed()));
                     started = Instant::now();
                     finished = None;
                 }

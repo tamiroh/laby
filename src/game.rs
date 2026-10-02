@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-pub const SIZE: usize = 21;
+use crate::maze::{Maze, SIZE};
 
 #[derive(Clone, Copy)]
 pub enum Action {
@@ -23,78 +23,36 @@ struct Motion {
 const MOTION_DURATION: Duration = Duration::from_millis(180);
 
 pub struct Game {
-    pub walls: [[bool; SIZE]; SIZE],
+    pub maze: Maze,
     pub seen: [[bool; SIZE]; SIZE],
     pub x: f64,
     pub y: f64,
     pub angle: f64,
-    pub goal: (usize, usize),
     pub steps: usize,
     pub won: bool,
     motion: Option<Motion>,
 }
 
 impl Game {
-    pub fn new(mut seed: u64) -> Self {
-        let mut walls = [[true; SIZE]; SIZE];
-        let mut stack = vec![(1, 1)];
-        walls[1][1] = false;
-        while let Some(&(x, y)) = stack.last() {
-            let neighbors: Vec<_> = [(0, -2), (2, 0), (0, 2), (-2, 0)]
-                .into_iter()
-                .filter_map(|(dx, dy)| {
-                    let nx = x as isize + dx;
-                    let ny = y as isize + dy;
-                    (nx > 0 && ny > 0 && nx < SIZE as isize - 1 && ny < SIZE as isize - 1)
-                        .then_some((nx as usize, ny as usize))
-                })
-                .filter(|&(nx, ny)| walls[ny][nx])
-                .collect();
-            if neighbors.is_empty() {
-                stack.pop();
-                continue;
-            }
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-            let (nx, ny) = neighbors[(seed >> 32) as usize % neighbors.len()];
-            walls[(y + ny) / 2][(x + nx) / 2] = false;
-            walls[ny][nx] = false;
-            stack.push((nx, ny));
-        }
-        // Put the exit at the most distant reachable cell.
-        let mut queue = std::collections::VecDeque::from([(1, 1)]);
-        let mut visited = [[false; SIZE]; SIZE];
-        visited[1][1] = true;
-        let mut goal = (1, 1);
-        while let Some((x, y)) = queue.pop_front() {
-            goal = (x, y);
-            for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                if !walls[ny][nx] && !visited[ny][nx] {
-                    visited[ny][nx] = true;
-                    queue.push_back((nx, ny));
-                }
-            }
-        }
+    pub fn new(maze: Maze) -> Self {
+        let (x, y) = maze.start();
+        let angle = maze.neighbors((x, y)).next().map_or(0.0, |(nx, ny)| {
+            (ny as f64 - y as f64)
+                .atan2(nx as f64 - x as f64)
+                .rem_euclid(TAU)
+        });
         let mut game = Self {
-            walls,
             seen: [[false; SIZE]; SIZE],
-            x: 1.5,
-            y: 1.5,
-            angle: if !walls[1][2] { 0.0 } else { FRAC_PI_2 },
-            goal,
+            x: x as f64 + 0.5,
+            y: y as f64 + 0.5,
+            angle,
+            maze,
             steps: 0,
             won: false,
             motion: None,
         };
         game.reveal();
         game
-    }
-
-    pub fn wall(&self, x: f64, y: f64) -> bool {
-        x < 0.0
-            || y < 0.0
-            || x >= SIZE as f64
-            || y >= SIZE as f64
-            || self.walls[y as usize][x as usize]
     }
 
     pub fn act(&mut self, action: Action) {
@@ -113,7 +71,10 @@ impl Game {
                 };
                 to.0 += self.angle.cos().round() * direction;
                 to.1 += self.angle.sin().round() * direction;
-                if self.wall(to.0, to.1) {
+                if self
+                    .maze
+                    .is_wall(to.0.floor() as isize, to.1.floor() as isize)
+                {
                     return;
                 }
             }
@@ -144,7 +105,7 @@ impl Game {
             self.angle = motion.to.2.rem_euclid(TAU);
             self.steps += usize::from(motion.moving);
             self.motion = None;
-            self.won = (self.x as usize, self.y as usize) == self.goal;
+            self.won = (self.x as usize, self.y as usize) == self.maze.goal();
             self.reveal();
         }
     }
@@ -184,7 +145,7 @@ impl Game {
                 ty += delta_y;
                 (ty - delta_y, true)
             };
-            if self.wall(x as f64, y as f64) {
+            if self.maze.is_wall(x as isize, y as isize) {
                 let texture = if side {
                     self.x + distance * dx
                 } else {
@@ -200,36 +161,15 @@ impl Game {
 mod tests {
     use super::*;
 
-    #[test]
-    fn every_passage_and_exit_are_reachable() {
-        for seed in 0..100 {
-            let game = Game::new(seed);
-            let mut visited = [[false; SIZE]; SIZE];
-            let mut stack = vec![(1, 1)];
-            while let Some((x, y)) = stack.pop() {
-                if visited[y][x] {
-                    continue;
-                }
-                visited[y][x] = true;
-                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                    if !game.walls[ny][nx] {
-                        stack.push((nx, ny));
-                    }
-                }
-            }
-            assert!(visited[game.goal.1][game.goal.0]);
-            assert_ne!(game.goal, (1, 1));
-            for (y, row) in visited.iter().enumerate() {
-                for (x, &reachable) in row.iter().enumerate() {
-                    assert_eq!(reachable, !game.walls[y][x]);
-                }
-            }
-        }
+    fn corridor(goal: (usize, usize)) -> Game {
+        let mut walls = [[true; SIZE]; SIZE];
+        walls[1][1..=3].fill(false);
+        Game::new(Maze::new(walls, (1, 1), goal))
     }
 
     #[test]
     fn movement_cannot_cross_walls() {
-        let mut game = Game::new(42);
+        let mut game = corridor((3, 1));
         game.angle = std::f64::consts::PI;
         for _ in 0..100 {
             game.act(Action::Forward);
@@ -242,7 +182,7 @@ mod tests {
 
     #[test]
     fn steps_animate_between_cell_centers_and_can_reverse() {
-        let mut game = Game::new(42);
+        let mut game = corridor((3, 1));
         let start = (game.x, game.y);
         let target = (
             game.x + game.angle.cos().round(),
@@ -270,7 +210,7 @@ mod tests {
 
     #[test]
     fn turns_animate_ninety_degrees_across_angle_wrap() {
-        let mut game = Game::new(42);
+        let mut game = corridor((3, 1));
         game.angle = 0.0;
         game.act(Action::Left);
         game.update(MOTION_DURATION / 2);
@@ -291,12 +231,7 @@ mod tests {
 
     #[test]
     fn entering_exit_wins_only_after_animation_and_stops_movement() {
-        let mut game = Game::new(7);
-        // Make the first reachable cell the exit to exercise a complete arrival.
-        game.goal = (
-            (game.x + game.angle.cos().round()) as usize,
-            (game.y + game.angle.sin().round()) as usize,
-        );
+        let mut game = corridor((2, 1));
         game.act(Action::Forward);
         game.update(MOTION_DURATION / 2);
         assert!(!game.won);
