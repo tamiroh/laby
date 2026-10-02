@@ -1,6 +1,26 @@
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::{
+    f64::consts::{FRAC_PI_2, TAU},
+    time::Duration,
+};
 
 pub const SIZE: usize = 21;
+
+#[derive(Clone, Copy)]
+pub enum Action {
+    Forward,
+    Backward,
+    Left,
+    Right,
+}
+
+struct Motion {
+    from: (f64, f64, f64),
+    to: (f64, f64, f64),
+    elapsed: Duration,
+    moving: bool,
+}
+
+const MOTION_DURATION: Duration = Duration::from_millis(180);
 
 pub struct Game {
     pub walls: [[bool; SIZE]; SIZE],
@@ -11,6 +31,7 @@ pub struct Game {
     pub goal: (usize, usize),
     pub steps: usize,
     pub won: bool,
+    motion: Option<Motion>,
 }
 
 impl Game {
@@ -62,6 +83,7 @@ impl Game {
             goal,
             steps: 0,
             won: false,
+            motion: None,
         };
         game.reveal();
         game
@@ -75,37 +97,55 @@ impl Game {
             || self.walls[y as usize][x as usize]
     }
 
-    pub fn advance(&mut self, forward: f64, sideways: f64) {
-        if self.won {
+    pub fn act(&mut self, action: Action) {
+        // Finish each step before accepting another, so key repeat cannot build a backlog.
+        if self.won || self.motion.is_some() {
             return;
         }
-        let dx = (self.angle.cos() * forward - self.angle.sin() * sideways) * 0.22;
-        let dy = (self.angle.sin() * forward + self.angle.cos() * sideways) * 0.22;
-        let old = (self.x, self.y);
-        if self.clear(self.x + dx, self.y) {
-            self.x += dx;
+        let mut to = (self.x, self.y, self.angle);
+        let moving = matches!(action, Action::Forward | Action::Backward);
+        match action {
+            Action::Forward | Action::Backward => {
+                let direction = if matches!(action, Action::Forward) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                to.0 += self.angle.cos().round() * direction;
+                to.1 += self.angle.sin().round() * direction;
+                if self.wall(to.0, to.1) {
+                    return;
+                }
+            }
+            Action::Left => to.2 -= FRAC_PI_2,
+            Action::Right => to.2 += FRAC_PI_2,
         }
-        if self.clear(self.x, self.y + dy) {
-            self.y += dy;
-        }
-        if old != (self.x, self.y) {
-            self.steps += 1;
-        }
-        self.won = (self.x as usize, self.y as usize) == self.goal;
-        self.reveal();
+        self.motion = Some(Motion {
+            from: (self.x, self.y, self.angle),
+            to,
+            elapsed: Duration::ZERO,
+            moving,
+        });
     }
 
-    fn clear(&self, x: f64, y: f64) -> bool {
-        [-0.18, 0.18].into_iter().all(|dx| {
-            [-0.18, 0.18]
-                .into_iter()
-                .all(|dy| !self.wall(x + dx, y + dy))
-        })
-    }
-
-    pub fn turn(&mut self, delta: f64) {
-        if !self.won {
-            self.angle = (self.angle + delta).rem_euclid(TAU);
+    pub fn update(&mut self, elapsed: Duration) {
+        let Some(motion) = &mut self.motion else {
+            return;
+        };
+        motion.elapsed += elapsed;
+        let progress = (motion.elapsed.as_secs_f64() / MOTION_DURATION.as_secs_f64()).min(1.0);
+        let eased = progress * progress * (3.0 - 2.0 * progress);
+        self.x = motion.from.0 + (motion.to.0 - motion.from.0) * eased;
+        self.y = motion.from.1 + (motion.to.1 - motion.from.1) * eased;
+        self.angle = (motion.from.2 + (motion.to.2 - motion.from.2) * eased).rem_euclid(TAU);
+        if progress >= 1.0 {
+            self.x = motion.to.0;
+            self.y = motion.to.1;
+            self.angle = motion.to.2.rem_euclid(TAU);
+            self.steps += usize::from(motion.moving);
+            self.motion = None;
+            self.won = (self.x as usize, self.y as usize) == self.goal;
+            self.reveal();
         }
     }
 
@@ -192,22 +232,80 @@ mod tests {
         let mut game = Game::new(42);
         game.angle = std::f64::consts::PI;
         for _ in 0..100 {
-            game.advance(1.0, 0.0);
+            game.act(Action::Forward);
+            game.update(MOTION_DURATION);
         }
-        assert!(game.x >= 1.18);
-        assert!(!game.wall(game.x, game.y));
-        assert!((game.cast(std::f64::consts::PI).0 - (game.x - 1.0)).abs() < 1e-9);
+        assert_eq!((game.x, game.y), (1.5, 1.5));
+        assert_eq!(game.steps, 0);
+        assert!((game.cast(std::f64::consts::PI).0 - 0.5).abs() < 1e-9);
     }
 
     #[test]
-    fn entering_exit_wins_and_stops_movement() {
+    fn steps_animate_between_cell_centers_and_can_reverse() {
+        let mut game = Game::new(42);
+        let start = (game.x, game.y);
+        let target = (
+            game.x + game.angle.cos().round(),
+            game.y + game.angle.sin().round(),
+        );
+        game.act(Action::Forward);
+        assert_eq!((game.x, game.y), start);
+        game.update(MOTION_DURATION / 2);
+        assert_eq!(
+            (game.x, game.y),
+            ((start.0 + target.0) / 2.0, (start.1 + target.1) / 2.0)
+        );
+        assert_eq!(game.steps, 0);
+        // Inputs during animation must not interrupt or queue up extra movement.
+        game.act(Action::Right);
+        game.act(Action::Forward);
+        game.update(MOTION_DURATION / 2);
+        assert_eq!((game.x, game.y), target);
+        assert_eq!(game.steps, 1);
+        game.act(Action::Backward);
+        game.update(Duration::from_secs(1));
+        assert_eq!((game.x, game.y), start);
+        assert_eq!(game.steps, 2);
+    }
+
+    #[test]
+    fn turns_animate_ninety_degrees_across_angle_wrap() {
+        let mut game = Game::new(42);
+        game.angle = 0.0;
+        game.act(Action::Left);
+        game.update(MOTION_DURATION / 2);
+        assert!((game.angle - 7.0 * std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+        game.update(MOTION_DURATION / 2);
+        assert!((game.angle - 3.0 * FRAC_PI_2).abs() < 1e-9);
+        game.act(Action::Right);
+        game.update(MOTION_DURATION);
+        assert!(game.angle.abs() < 1e-9);
+        for _ in 0..4 {
+            game.act(Action::Right);
+            game.update(MOTION_DURATION);
+        }
+        assert!(game.angle.abs() < 1e-9);
+        assert_eq!((game.x, game.y), (1.5, 1.5));
+        assert_eq!(game.steps, 0);
+    }
+
+    #[test]
+    fn entering_exit_wins_only_after_animation_and_stops_movement() {
         let mut game = Game::new(7);
-        game.x = game.goal.0 as f64 + 0.5;
-        game.y = game.goal.1 as f64 + 0.5;
-        game.advance(0.0, 0.0);
+        // Make the first reachable cell the exit to exercise a complete arrival.
+        game.goal = (
+            (game.x + game.angle.cos().round()) as usize,
+            (game.y + game.angle.sin().round()) as usize,
+        );
+        game.act(Action::Forward);
+        game.update(MOTION_DURATION / 2);
+        assert!(!game.won);
+        game.update(MOTION_DURATION / 2);
         assert!(game.won);
-        let position = (game.x, game.y);
-        game.advance(1.0, 0.0);
-        assert_eq!(position, (game.x, game.y));
+        let position = (game.x, game.y, game.angle);
+        game.act(Action::Backward);
+        game.act(Action::Left);
+        game.update(MOTION_DURATION);
+        assert_eq!(position, (game.x, game.y, game.angle));
     }
 }

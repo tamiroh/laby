@@ -7,7 +7,7 @@ use crossterm::{
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use game::Game;
+use game::{Action, Game};
 use std::{
     io::{self, IsTerminal, Write},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -46,7 +46,7 @@ fn main() -> io::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "LABY — terminal maze explorer\n\nUsage: laby [--seed NUMBER]\n\nUp/Down: walk   Left/Right: turn\nM: map   R: new maze   Esc/Ctrl-C: quit\n\nFind the green exit. Recommended terminal: 100 x 32 or larger."
+            "LABY — terminal maze explorer\n\nUsage: laby [--seed NUMBER]\n\nUp/Down: move one cell   Left/Right: turn 90 degrees\nM: map   R: new maze   Esc/Ctrl-C: quit\n\nFind the green exit. Recommended terminal: 100 x 32 or larger."
         );
         return Ok(());
     }
@@ -81,7 +81,14 @@ fn main() -> io::Result<()> {
     let mut finished = None;
     let mut map = true;
     let mut stdout = io::BufWriter::new(io::stdout());
+    let mut last_frame = Instant::now();
     loop {
+        let now = Instant::now();
+        game.update(now.duration_since(last_frame));
+        last_frame = now;
+        if game.won && finished.is_none() {
+            finished = Some(started.elapsed());
+        }
         let (width, height) = terminal::size()?;
         render::draw(
             &mut stdout,
@@ -92,7 +99,7 @@ fn main() -> io::Result<()> {
             finished.unwrap_or_else(|| started.elapsed()),
         )?;
         stdout.flush()?;
-        if !event::poll(Duration::from_millis(50))? {
+        if !event::poll(Duration::from_millis(16))? {
             continue;
         }
         if let Event::Key(key) = event::read()? {
@@ -105,10 +112,10 @@ fn main() -> io::Result<()> {
                 break;
             }
             match key.code {
-                KeyCode::Up => game.advance(1.0, 0.0),
-                KeyCode::Down => game.advance(-1.0, 0.0),
-                KeyCode::Left => game.turn(-0.13),
-                KeyCode::Right => game.turn(0.13),
+                KeyCode::Up => game.act(Action::Forward),
+                KeyCode::Down => game.act(Action::Backward),
+                KeyCode::Left => game.act(Action::Left),
+                KeyCode::Right => game.act(Action::Right),
                 KeyCode::Char('m' | 'M') => map = !map,
                 KeyCode::Char('r' | 'R') => {
                     game = Game::new(seed());
@@ -116,9 +123,6 @@ fn main() -> io::Result<()> {
                     finished = None;
                 }
                 _ => {}
-            }
-            if game.won && finished.is_none() {
-                finished = Some(started.elapsed());
             }
         }
     }
