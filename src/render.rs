@@ -69,7 +69,7 @@ pub fn draw(
             GOLD,
         );
     } else {
-        let view_h = h - 6;
+        let view_h = h - 5;
         let fov = 1.1_f64;
         let projection = w as f64 / (2.0 * (fov / 2.0).tan()) * 0.48;
         let mut depth = vec![0.0; w];
@@ -80,7 +80,7 @@ pub fn draw(
             let wall_h = projection / *depth_column;
             for y in 0..view_h {
                 let relative = y as f64 - view_h as f64 / 2.0;
-                let cell = &mut cells[(y + 3) * w + x];
+                let cell = &mut cells[(y + 2) * w + x];
                 if relative.abs() <= wall_h / 2.0 {
                     let light = (1.0 / (1.0 + distance * 0.16)) * if side { 0.68 } else { 1.0 };
                     let mortar =
@@ -117,7 +117,7 @@ pub fn draw(
                 if (x as f64 - center).abs() < (beacon_h * 0.3).max(0.7) && forward < wall_depth {
                     for y in 0..view_h {
                         if (y as f64 - view_h as f64 / 2.0).abs() < beacon_h / 2.0 {
-                            cells[(y + 3) * w + x] = Cell {
+                            cells[(y + 2) * w + x] = Cell {
                                 glyph: '*',
                                 color: GREEN,
                             };
@@ -131,27 +131,48 @@ pub fn draw(
             w,
             2,
             0,
-            "L A B Y   /   THE LOST CORRIDORS",
-            GOLD,
-        );
-        let direction =
-            ["E", "S", "W", "N"][((game.angle / std::f64::consts::FRAC_PI_2).round() as usize) % 4];
-        text(
-            &mut cells,
-            w,
-            2,
-            1,
             &format!(
-                "Find the green exit    {:02}:{:02}    Moves {}    Facing {direction}",
+                "{:02}:{:02}    Moves {}",
                 elapsed.as_secs() / 60,
                 elapsed.as_secs() % 60,
                 game.steps
             ),
             Color::Grey,
         );
+        let compass_x = w / 2 - 4;
+        for (y, row) in [
+            "    N    ",
+            "         ",
+            "W   +   E",
+            "         ",
+            "    S    ",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            text(&mut cells, w, compass_x, y, row, Color::Grey);
+        }
+        let (dx, dy, pointer) = [
+            (2, 0, ">"),
+            (2, 1, "\\"),
+            (0, 1, "v"),
+            (-2, 1, "/"),
+            (-2, 0, "<"),
+            (-2, -1, "\\"),
+            (0, -1, "^"),
+            (2, -1, "/"),
+        ][((game.angle / std::f64::consts::FRAC_PI_4).round() as usize) % 8];
+        text(
+            &mut cells,
+            w,
+            (compass_x as isize + 4 + dx) as usize,
+            (2 + dy) as usize,
+            pointer,
+            GOLD,
+        );
         if map && h >= SIZE + 9 && w >= 85 {
             let left = w - SIZE - 3;
-            text(&mut cells, w, left, 3, " EXPLORED / @ YOU", GOLD);
+            text(&mut cells, w, left, 2, " EXPLORED / @ YOU", GOLD);
             for y in 0..SIZE {
                 for x in 0..SIZE {
                     let (glyph, color) = if (x, y) == (game.x as usize, game.y as usize) {
@@ -165,7 +186,7 @@ pub fn draw(
                     } else {
                         ('.', Color::Grey)
                     };
-                    cells[(y + 4) * w + left + x] = Cell { glyph, color };
+                    cells[(y + 3) * w + left + x] = Cell { glyph, color };
                 }
             }
         }
@@ -174,16 +195,8 @@ pub fn draw(
             w,
             2,
             h - 2,
-            "Up/Down Walk   Left/Right Turn   M Map   R New maze",
+            "Up/Down Walk  Left/Right Turn  M Map  R New  Esc Quit",
             Color::Grey,
-        );
-        text(
-            &mut cells,
-            w,
-            2,
-            h - 1,
-            "Hold arrow keys to explore. Esc Quit",
-            Color::DarkGrey,
         );
         if game.won {
             let message = " EXIT FOUND!  R: explore a new maze  Esc: quit ";
