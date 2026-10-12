@@ -1,4 +1,4 @@
-use crate::{game::Game, maze::SIZE};
+use crate::game::Game;
 use crossterm::{
     cursor::MoveTo,
     queue,
@@ -43,7 +43,6 @@ pub fn draw(
     game: &Game,
     width: u16,
     height: u16,
-    map: bool,
     elapsed: Duration,
 ) -> io::Result<()> {
     // Leave the last column unused to avoid terminal auto-wrap.
@@ -100,8 +99,21 @@ pub fn draw(
                         b: (210.0 * light) as u8,
                     };
                 } else if relative > 0.0 {
-                    cell.glyph = if (x + y * 3) % 11 == 0 { '.' } else { ' ' };
-                    cell.color = Color::DarkGrey;
+                    // Intersect this screen pixel's ray with the floor plane.
+                    // This branch is below the wall, so footprints are naturally occluded.
+                    let floor_depth = projection / (2.0 * relative);
+                    let distance = floor_depth / offset.cos();
+                    let angle = game.angle + offset;
+                    if game.footprint_at(
+                        game.x + distance * angle.cos(),
+                        game.y + distance * angle.sin(),
+                    ) {
+                        cell.glyph = 'o';
+                        cell.color = GOLD;
+                    } else {
+                        cell.glyph = if (x + y * 3) % 11 == 0 { '.' } else { ' ' };
+                        cell.color = Color::DarkGrey;
+                    }
                 }
             }
         }
@@ -170,32 +182,12 @@ pub fn draw(
             pointer,
             GOLD,
         );
-        if map && h >= SIZE + 9 && w >= 85 {
-            let left = w - SIZE - 3;
-            text(&mut cells, w, left, 2, " EXPLORED / @ YOU", GOLD);
-            for y in 0..SIZE {
-                for x in 0..SIZE {
-                    let (glyph, color) = if (x, y) == (game.x as usize, game.y as usize) {
-                        ('@', GOLD)
-                    } else if !game.seen[y][x] {
-                        (' ', Color::DarkGrey)
-                    } else if (x, y) == game.maze.goal() {
-                        ('X', GREEN)
-                    } else if game.maze.is_wall(x as isize, y as isize) {
-                        ('#', Color::DarkGrey)
-                    } else {
-                        ('.', Color::Grey)
-                    };
-                    cells[(y + 3) * w + left + x] = Cell { glyph, color };
-                }
-            }
-        }
         text(
             &mut cells,
             w,
             2,
             h - 2,
-            "Up/Down Walk  Left/Right Turn  M Map  R New  Esc Quit",
+            "Up/Down Walk  Left/Right Turn  R New  Esc Quit",
             Color::Grey,
         );
         if game.won {
@@ -205,15 +197,6 @@ pub fn draw(
                 text(&mut cells, w, left, y, &" ".repeat(message.len()), GREEN);
             }
             text(&mut cells, w, left, h / 2, message, GREEN);
-        } else if map && (h < SIZE + 9 || w < 85) {
-            text(
-                &mut cells,
-                w,
-                2,
-                h - 3,
-                "Map needs 86 x 30 terminal. M: toggle",
-                GOLD,
-            );
         }
     }
     queue!(out, SetBackgroundColor(SKY))?;
@@ -236,15 +219,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn footprints_are_visible_on_floor_but_hidden_behind_walls() {
+        let mut walls = [[true; crate::maze::SIZE]; crate::maze::SIZE];
+        walls[1][1..=3].fill(false);
+        let mut game = Game::new(crate::maze::Maze::new(walls, (1, 1), (3, 1)));
+        let render = |game: &Game| {
+            let mut output = Vec::new();
+            draw(&mut output, game, 100, 32, Duration::ZERO).unwrap();
+            output
+        };
+        let blank = render(&game);
+        game.footprints[1][5] = Some(0.0);
+        assert_eq!(render(&game), blank);
+        game.footprints[1][3] = Some(0.0);
+        assert!(render(&game) != blank, "floor footprints should be visible");
+    }
+
+    #[test]
     fn renders_small_normal_and_winning_screens() {
         let mut game = Game::new(crate::generator::generate(42));
         for (width, height) in [(0, 0), (1, 1), (40, 10), (59, 20), (100, 32), (160, 48)] {
             let mut output = Vec::new();
-            draw(&mut output, &game, width, height, true, Duration::ZERO).unwrap();
+            draw(&mut output, &game, width, height, Duration::ZERO).unwrap();
         }
         game.won = true;
         let mut output = Vec::new();
-        draw(&mut output, &game, 100, 32, true, Duration::ZERO).unwrap();
+        draw(&mut output, &game, 100, 32, Duration::ZERO).unwrap();
         assert!(String::from_utf8(output).unwrap().contains("EXIT FOUND!"));
     }
 }

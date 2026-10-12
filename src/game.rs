@@ -24,7 +24,7 @@ const MOTION_DURATION: Duration = Duration::from_millis(180);
 
 pub struct Game {
     pub maze: Maze,
-    pub seen: [[bool; SIZE]; SIZE],
+    pub footprints: [[Option<f64>; SIZE]; SIZE],
     pub x: f64,
     pub y: f64,
     pub angle: f64,
@@ -41,8 +41,8 @@ impl Game {
                 .atan2(nx as f64 - x as f64)
                 .rem_euclid(TAU)
         });
-        let mut game = Self {
-            seen: [[false; SIZE]; SIZE],
+        Self {
+            footprints: [[None; SIZE]; SIZE],
             x: x as f64 + 0.5,
             y: y as f64 + 0.5,
             angle,
@@ -50,9 +50,7 @@ impl Game {
             steps: 0,
             won: false,
             motion: None,
-        };
-        game.reveal();
-        game
+        }
     }
 
     pub fn act(&mut self, action: Action) {
@@ -103,21 +101,31 @@ impl Game {
             self.x = motion.to.0;
             self.y = motion.to.1;
             self.angle = motion.to.2.rem_euclid(TAU);
-            self.steps += usize::from(motion.moving);
+            if motion.moving {
+                for (x, y) in [(motion.from.0, motion.from.1), (motion.to.0, motion.to.1)] {
+                    self.footprints[y as usize][x as usize] = Some(motion.from.2);
+                }
+                self.steps += 1;
+            }
             self.motion = None;
             self.won = (self.x as usize, self.y as usize) == self.maze.goal();
-            self.reveal();
         }
     }
 
-    fn reveal(&mut self) {
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                if (x as f64 + 0.5 - self.x).hypot(y as f64 + 0.5 - self.y) < 3.0 {
-                    self.seen[y][x] = true;
-                }
-            }
+    pub fn footprint_at(&self, x: f64, y: f64) -> bool {
+        if x < 0.0 || y < 0.0 || x >= SIZE as f64 || y >= SIZE as f64 {
+            return false;
         }
+        let Some(angle) = self.footprints[y as usize][x as usize] else {
+            return false;
+        };
+        let (dx, dy) = (x.fract() - 0.5, y.fract() - 0.5);
+        let along = dx * angle.cos() + dy * angle.sin();
+        let across = -dx * angle.sin() + dy * angle.cos();
+        // Two staggered soles, oriented with the walker's feet.
+        [(-0.18, -0.14), (0.18, 0.14)]
+            .into_iter()
+            .any(|(a, b)| ((along - a) / 0.16).powi(2) + ((across - b) / 0.075).powi(2) <= 1.0)
     }
 
     pub fn cast(&self, angle: f64) -> (f64, bool, f64) {
@@ -165,6 +173,35 @@ mod tests {
         let mut walls = [[true; SIZE]; SIZE];
         walls[1][1..=3].fill(false);
         Game::new(Maze::new(walls, (1, 1), goal))
+    }
+
+    #[test]
+    fn footprints_follow_completed_walks_and_reset_with_a_new_game() {
+        let mut game = corridor((3, 1));
+        game.act(Action::Backward); // A wall: no footprints.
+        game.update(MOTION_DURATION);
+        assert!(game.footprints.iter().flatten().all(Option::is_none));
+        game.act(Action::Forward);
+        game.update(MOTION_DURATION / 2);
+        assert!(game.footprints.iter().flatten().all(Option::is_none));
+        game.update(MOTION_DURATION / 2);
+        assert_eq!(game.footprints[1][1], Some(0.0));
+        assert_eq!(game.footprints[1][2], Some(0.0));
+        assert_eq!(game.footprints[1][3], None);
+        assert!(game.footprint_at(1.32, 1.36));
+        assert!(game.footprint_at(1.68, 1.64));
+        assert!(!game.footprint_at(1.5, 1.5));
+        let footprints = game.footprints;
+        game.act(Action::Right);
+        game.update(MOTION_DURATION);
+        assert_eq!(game.footprints, footprints);
+        assert!(
+            corridor((3, 1))
+                .footprints
+                .iter()
+                .flatten()
+                .all(Option::is_none)
+        );
     }
 
     #[test]

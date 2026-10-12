@@ -48,7 +48,7 @@ fn main() -> io::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "LABY — terminal maze explorer\n\nUsage: laby [--seed NUMBER]\n\nUp/Down: move one cell   Left/Right: turn 90 degrees\nM: map   R: new maze   Esc/Ctrl-C: quit\n\nFind the green exit. Recommended terminal: 100 x 32 or larger."
+            "LABY — terminal maze explorer\n\nUsage: laby [--seed NUMBER]\n\nUp/Down: move one cell   Left/Right: turn 90 degrees\nR: new maze   Esc/Ctrl-C: quit\n\nFind the green exit. Recommended terminal: 100 x 32 or larger."
         );
         return Ok(());
     }
@@ -81,7 +81,6 @@ fn main() -> io::Result<()> {
     let mut game = Game::new(generator::generate(initial_seed));
     let mut started = Instant::now();
     let mut finished = None;
-    let mut map = true;
     let mut stdout = io::BufWriter::new(io::stdout());
     let mut last_frame = Instant::now();
     loop {
@@ -97,7 +96,6 @@ fn main() -> io::Result<()> {
             &game,
             width,
             height,
-            map,
             finished.unwrap_or_else(|| started.elapsed()),
         )?;
         stdout.flush()?;
@@ -118,7 +116,6 @@ fn main() -> io::Result<()> {
                 KeyCode::Down => game.act(Action::Backward),
                 KeyCode::Left => game.act(Action::Left),
                 KeyCode::Right => game.act(Action::Right),
-                KeyCode::Char('m' | 'M') => map = !map,
                 KeyCode::Char('r' | 'R') => {
                     game = Game::new(generator::generate(seed()));
                     started = Instant::now();
