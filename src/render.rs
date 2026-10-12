@@ -151,37 +151,6 @@ pub fn draw(
             ),
             Color::Grey,
         );
-        let compass_x = w / 2 - 4;
-        for (y, row) in [
-            "    N    ",
-            "         ",
-            "W   +   E",
-            "         ",
-            "    S    ",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            text(&mut cells, w, compass_x, y, row, Color::Grey);
-        }
-        let (dx, dy, pointer) = [
-            (2, 0, ">"),
-            (2, 1, "\\"),
-            (0, 1, "v"),
-            (-2, 1, "/"),
-            (-2, 0, "<"),
-            (-2, -1, "\\"),
-            (0, -1, "^"),
-            (2, -1, "/"),
-        ][((game.angle / std::f64::consts::FRAC_PI_4).round() as usize) % 8];
-        text(
-            &mut cells,
-            w,
-            (compass_x as isize + 4 + dx) as usize,
-            (2 + dy) as usize,
-            pointer,
-            GOLD,
-        );
         text(
             &mut cells,
             w,
