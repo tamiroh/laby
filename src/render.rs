@@ -109,7 +109,26 @@ pub fn draw(
                         game.y + distance * angle.sin(),
                     ) {
                         cell.glyph = 'o';
-                        cell.color = GOLD;
+                        // Blend toward the background as footprints recede into the maze.
+                        let visibility = 1.0 / (1.0 + 0.12 * distance * distance);
+                        let fade = |near: u8, far: u8| {
+                            (far as f64 + (near as f64 - far as f64) * visibility) as u8
+                        };
+                        if let (
+                            Color::Rgb { r, g, b },
+                            Color::Rgb {
+                                r: br,
+                                g: bg,
+                                b: bb,
+                            },
+                        ) = (GOLD, SKY)
+                        {
+                            cell.color = Color::Rgb {
+                                r: fade(r, br),
+                                g: fade(g, bg),
+                                b: fade(b, bb),
+                            };
+                        }
                     } else {
                         cell.glyph = if (x + y * 3) % 11 == 0 { '.' } else { ' ' };
                         cell.color = Color::DarkGrey;
